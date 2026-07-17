@@ -151,7 +151,7 @@ async def run_agent_loop(
         response_text = await generate_text(
             prompt=full_prompt,
             system_prompt=get_system_prompt(),
-            max_tokens=300,
+            max_tokens=4096,
         )
     except Exception as exc:
         logger.error("Agent loop error: %s", exc)
