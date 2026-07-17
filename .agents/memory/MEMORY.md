@@ -1,0 +1,2 @@
+- [Siraj backend setup](siraj-backend.md) — FastAPI on NixOS: use .pythonlibs Python, force SQLite via SIRAJ_DATABASE_URL to avoid asyncpg missing.
+- [NixOS Python pip](nix-python-pip.md) — pip not in PATH; use installProgrammingLanguage then .pythonlibs/bin/python3; pip install --target fails, packages land in .pythonlibs via installProgrammingLanguage.
