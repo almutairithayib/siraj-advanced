@@ -1,14 +1,20 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useContext } from 'react';
 import apiClient from '../api/client';
+import { AuthContext } from './AuthContext';
 
 export const SavingsContext = createContext(null);
 
 export const SavingsProvider = ({ children }) => {
-  const [plans, setPlans] = useState([]);
+  const [plans, setPlans]   = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError]   = useState(null);
+
+  // FIX: Only fetch after authentication
+  const { isAuthenticated } = useContext(AuthContext);
 
   const fetchPlans = async () => {
+    // Guard — skip if no token (prevents pre-login 401 race condition)
+    if (!localStorage.getItem('siraj_token')) return;
     setLoading(true);
     setError(null);
     try {
@@ -22,9 +28,11 @@ export const SavingsProvider = ({ children }) => {
     }
   };
 
+  // FIX: Depend on isAuthenticated so fetching starts only after login
   useEffect(() => {
+    if (!isAuthenticated) return;
     fetchPlans();
-  }, []);
+  }, [isAuthenticated]);
 
   const addPlan = async (name, target, months) => {
     setLoading(true);
@@ -35,35 +43,32 @@ export const SavingsProvider = ({ children }) => {
       const monthlyContribution = Number(target) / (Number(months) || 12);
 
       const response = await apiClient.post('/savings/plans', {
-        goal_name: name,
-        target_amount: parseFloat(target),
-        current_amount: 0.0,
-        target_date: targetDateStr,
+        goal_name:            name,
+        target_amount:        parseFloat(target),
+        current_amount:       0.0,
+        target_date:          targetDateStr,
         monthly_contribution: parseFloat(monthlyContribution.toFixed(2)),
-        status: 'active'
+        status:               'active',
       });
 
-      setPlans((prev) => [response.data, ...prev]);
+      setPlans(prev => [response.data, ...prev]);
       return { success: true, data: response.data };
     } catch (err) {
       console.error('Failed to create savings plan:', err);
-      // Hackathon Fallback: If network error, mock the success!
-      if (err.message.includes('Network Error') || !err.response) {
+      // Offline fallback — only when server is unreachable (no response)
+      if (!err.response) {
         const targetDateObj = new Date();
         targetDateObj.setMonth(targetDateObj.getMonth() + (Number(months) || 12));
-        const targetDateStr = targetDateObj.toISOString().split('T')[0];
-        const monthlyContribution = Number(target) / (Number(months) || 12);
-        
         const mockPlan = {
-          id: Date.now().toString(),
-          goal_name: name,
-          target_amount: parseFloat(target),
-          current_amount: 0.0,
-          target_date: targetDateStr,
-          monthly_contribution: parseFloat(monthlyContribution.toFixed(2)),
-          status: 'active'
+          id:                   Date.now().toString(),
+          goal_name:            name,
+          target_amount:        parseFloat(target),
+          current_amount:       0.0,
+          target_date:          targetDateObj.toISOString().split('T')[0],
+          monthly_contribution: parseFloat((Number(target) / (Number(months) || 12)).toFixed(2)),
+          status:               'active',
         };
-        setPlans((prev) => [mockPlan, ...prev]);
+        setPlans(prev => [mockPlan, ...prev]);
         return { success: true, data: mockPlan };
       }
       return { success: false, error: err.response?.data?.detail || err.message };
@@ -77,7 +82,7 @@ export const SavingsProvider = ({ children }) => {
       const response = await apiClient.put(`/savings/plans/${id}`, {
         current_amount: parseFloat(currentAmount),
       });
-      setPlans((prev) => prev.map((p) => (p.id === id ? response.data : p)));
+      setPlans(prev => prev.map(p => p.id === id ? response.data : p));
       return { success: true, data: response.data };
     } catch (err) {
       console.error('Failed to update savings plan progress:', err);
