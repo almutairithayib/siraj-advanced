@@ -23,50 +23,66 @@ logger = logging.getLogger("siraj.ai.agent_loop")
 
 async def _get_financial_summary(user_id: uuid.UUID, db: AsyncSession) -> str:
     """Build a full financial context from the user's real data."""
+    from sqlalchemy import func, and_
     today = date.today()
-    month_ago = today - timedelta(days=30)
+    start_of_month = date(today.year, today.month, 1)
 
-    # --- Transactions (last 30 days) ---
-    txn_result = await db.execute(
+    # --- الرصيد الكامل: كل الدخل - كل المصروفات (منذ البداية) ---
+    all_income_res = await db.execute(
+        select(func.sum(Transaction.amount)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == "income",
+        )
+    )
+    all_expense_res = await db.execute(
+        select(func.sum(Transaction.amount)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == "expense",
+        )
+    )
+    total_income_all = Decimal(str(all_income_res.scalar() or 0))
+    total_expense_all = Decimal(str(all_expense_res.scalar() or 0))
+    balance = total_income_all - total_expense_all
+
+    # --- مصروفات الشهر الحالي ---
+    month_txn_result = await db.execute(
         select(Transaction)
         .where(
             Transaction.user_id == user_id,
-            Transaction.transaction_date >= month_ago,
+            Transaction.transaction_date >= start_of_month,
         )
         .order_by(Transaction.transaction_date.desc())
     )
-    txns = txn_result.scalars().all()
+    month_txns = month_txn_result.scalars().all()
 
-    total_income = Decimal("0")
-    total_expense = Decimal("0")
+    month_income = Decimal("0")
+    month_expense = Decimal("0")
     by_category: dict[str, Decimal] = defaultdict(Decimal)
 
-    for t in txns:
+    for t in month_txns:
         amount = Decimal(str(t.amount))
         if t.type == "income":
-            total_income += amount
+            month_income += amount
         else:
-            total_expense += amount
+            month_expense += amount
             by_category[t.category] += amount
 
-    balance = total_income - total_expense
     top_cats = sorted(by_category.items(), key=lambda x: x[1], reverse=True)[:3]
     top_cats_str = "، ".join(f"{cat} ({float(amt):,.0f} ريال)" for cat, amt in top_cats) or "لا يوجد"
 
-    recent = txns[:5]
+    recent = month_txns[:5]
     recent_str = "\n".join(
         f"  {t.transaction_date} | {t.type} | {t.category} | {float(t.amount):,.0f} ريال | {t.description or ''}"
         for t in recent
     ) or "  لا توجد معاملات"
 
     txn_section = (
-        f"المعاملات المالية (آخر 30 يوم):\n"
-        f"إجمالي الدخل: {float(total_income):,.0f} ريال\n"
-        f"إجمالي المصروفات: {float(total_expense):,.0f} ريال\n"
-        f"صافي الرصيد: {float(balance):,.0f} ريال\n"
-        f"أكثر فئات الإنفاق: {top_cats_str}\n"
+        f"الرصيد الكامل (منذ البداية): {float(balance):,.0f} ريال\n"
+        f"مصروفات الشهر الحالي: {float(month_expense):,.0f} ريال\n"
+        f"دخل الشهر الحالي: {float(month_income):,.0f} ريال\n"
+        f"أكثر فئات الإنفاق هذا الشهر: {top_cats_str}\n"
         f"آخر المعاملات:\n{recent_str}"
-    ) if txns else "المعاملات المالية: لا توجد معاملات خلال آخر 30 يوماً"
+    )
 
     # --- Financial Goals ---
     goals_result = await db.execute(

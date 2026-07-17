@@ -1,9 +1,8 @@
 """Build financial context for AI prompts."""
 
 import logging
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
-from collections import defaultdict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func
@@ -14,57 +13,62 @@ logger = logging.getLogger("siraj.ai.context")
 
 
 async def build_context(user_id, db: AsyncSession) -> dict:
-    """Build a context dict using last 30 days — same window as agent_loop."""
+    """
+    الرصيد الكامل: كل الدخل - كل المصروفات منذ البداية.
+    المصروفات والفئات: الشهر الحالي فقط.
+    """
     try:
         today = date.today()
-        month_ago = today - timedelta(days=30)
+        start_of_month = date(today.year, today.month, 1)
 
-        income_res = await db.execute(
+        # الرصيد الكامل (كل الوقت)
+        all_income = await db.execute(
             select(func.sum(Transaction.amount)).where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.type == "income",
-                    Transaction.transaction_date >= month_ago,
-                )
+                Transaction.user_id == user_id,
+                Transaction.type == "income",
             )
         )
-        total_income = float(income_res.scalar() or 0.0)
-
-        expense_res = await db.execute(
+        all_expense = await db.execute(
             select(func.sum(Transaction.amount)).where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.type == "expense",
-                    Transaction.transaction_date >= month_ago,
-                )
+                Transaction.user_id == user_id,
+                Transaction.type == "expense",
             )
         )
-        total_expense = float(expense_res.scalar() or 0.0)
+        total_income_all = float(all_income.scalar() or 0)
+        total_expense_all = float(all_expense.scalar() or 0)
+        balance = total_income_all - total_expense_all
 
-        # Top spending category
-        cats_res = await db.execute(
+        # مصروفات الشهر الحالي
+        month_expense = await db.execute(
+            select(func.sum(Transaction.amount)).where(
+                Transaction.user_id == user_id,
+                Transaction.type == "expense",
+                Transaction.transaction_date >= start_of_month,
+            )
+        )
+        total_spending_month = float(month_expense.scalar() or 0)
+
+        # أكثر فئة إنفاقاً هذا الشهر
+        top_row = await db.execute(
             select(Transaction.category, func.sum(Transaction.amount).label("total"))
             .where(
-                and_(
-                    Transaction.user_id == user_id,
-                    Transaction.type == "expense",
-                    Transaction.transaction_date >= month_ago,
-                )
+                Transaction.user_id == user_id,
+                Transaction.type == "expense",
+                Transaction.transaction_date >= start_of_month,
             )
             .group_by(Transaction.category)
             .order_by(func.sum(Transaction.amount).desc())
             .limit(1)
         )
-        top_row = cats_res.first()
-        top_category = top_row[0] if top_row else "غير محدد"
+        top = top_row.first()
+        top_category = top[0] if top else "غير محدد"
 
-        balance = total_income - total_expense
-        health_score = min(100, max(0, int((balance / total_income * 100)) if total_income > 0 else 0))
+        health_score = min(100, max(0, int((balance / total_income_all * 100)) if total_income_all > 0 else 0))
 
         return {
             "balance": balance,
-            "total_spending": total_expense,
-            "total_income": total_income,
+            "total_spending": total_spending_month,
+            "total_income": total_income_all,
             "health_score": health_score,
             "top_category": top_category,
         }
