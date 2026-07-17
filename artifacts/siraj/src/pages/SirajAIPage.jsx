@@ -266,58 +266,45 @@ export default function SirajAIPage() {
     setTyping(true);
 
     try {
-      const token = localStorage.getItem('siraj_token');
-      const response = await fetch(`${API_BASE_URL}/chat/sessions/${targetSessionId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ content: text }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to stream assistant reply');
-      }
+      // Use plain JSON (not SSE) — Replit proxy doesn't stream reliably
+      const response = await apiClient.post(
+        `/chat/sessions/${targetSessionId}/messages`,
+        { content: text }
+      );
 
       setTyping(false);
-      const assistantMessageId = Date.now().toString();
-      addMessage({ id: assistantMessageId, role: 'assistant', text: '' }, targetSessionId);
+      const replyText = response.data?.reply || 'عذراً، لم أتلقَّ رداً من الخادم.';
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let done = false;
-      let accumulatedText = '';
+      // Add message with isNew flag so the Typewriter effect plays
+      addMessage(
+        { id: Date.now().toString(), role: 'assistant', text: replyText, isNew: true },
+        targetSessionId
+      );
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunkStr = decoder.decode(value, { stream: true });
-          const lines = chunkStr.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.substring(6).trim();
-              if (dataStr) {
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  if (parsed.content) {
-                    accumulatedText += parsed.content;
-                    updateMessageText(assistantMessageId, accumulatedText, targetSessionId);
-                  }
-                } catch (e) {
-                  // Ignore parsing metadata or partial JSON lines
-                }
-              }
-            }
-          }
-        }
-      }
+      // After animation (~80ms per char), strip the isNew flag so it renders as plain text
+      setTimeout(() => {
+        setSessions(prev =>
+          prev.map(s => {
+            if (s.id !== targetSessionId) return s;
+            return {
+              ...s,
+              messages: s.messages.map(m =>
+                m.isNew ? { ...m, isNew: false } : m
+              ),
+            };
+          })
+        );
+      }, replyText.length * 55 + 800);
+
     } catch (err) {
       console.error('Chat error:', err);
       setTyping(false);
       addMessage(
-        { id: Date.now().toString(), role: 'assistant', text: 'عذراً، خدمة المساعد الذكي غير متوفرة مؤقتاً بسبب ضغط على الخوادم. يرجى المحاولة مرة أخرى بعد لحظات. بياناتك المالية آمنة ويمكنك تصفح لوحة التحكم بشكل طبيعي.' },
+        {
+          id: Date.now().toString(),
+          role: 'assistant',
+          text: 'عذراً، خدمة المساعد الذكي غير متوفرة مؤقتاً. يرجى المحاولة مرة أخرى بعد لحظات.',
+        },
         targetSessionId
       );
     }
@@ -451,7 +438,7 @@ export default function SirajAIPage() {
         {messages.map((m, i) => (
           <div key={m.id || i} className={`siraj-msg-row ${m.role === 'user' ? 'user' : 'assistant'}`} style={{ position: 'relative', zIndex: 1 }}>
             <div className={`siraj-msg-bubble ${m.role === 'user' ? 'user' : 'assistant'}`} style={{ whiteSpace: 'pre-wrap' }}>
-              {m.text}
+              {m.isNew ? <Typewriter text={m.text} speed={45} /> : m.text}
             </div>
           </div>
         ))}

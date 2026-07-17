@@ -1,14 +1,11 @@
 """
-Simplified AI agent loop for Siraj — uses OpenAI API with fallback.
+AI agent loop for Siraj — returns full response as JSON (Replit proxy-safe).
 """
 
 import uuid
-import asyncio
 import logging
-from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_
 
 from backend.app.models.chat import ChatMessage
 from backend.app.ai.ai_provider import generate_text, FALLBACK_MESSAGE_AR
@@ -21,12 +18,13 @@ async def run_agent_loop(
     session_id: uuid.UUID,
     user_message: str,
     user_id: uuid.UUID,
-    db: AsyncSession
-) -> AsyncGenerator[str, None]:
+    db: AsyncSession,
+) -> str:
     """
-    Main AI agent loop — calls AI provider and streams response chunks.
+    Main AI agent — builds context, calls AI provider, saves reply, returns text.
+    NOTE: User message is already saved by the chat router before calling this.
     """
-    # Load recent chat history (last 10 messages)
+    # Load recent chat history (last 10 messages, excluding the one just saved)
     history_result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
@@ -38,30 +36,17 @@ async def run_agent_loop(
     # Build conversation context
     context_lines = []
     for msg in history:
-        role = "المستخدم" if msg.role == "user" else "سراج"
-        context_lines.append(f"{role}: {msg.content}")
+        role_label = "المستخدم" if msg.role == "user" else "سراج"
+        context_lines.append(f"{role_label}: {msg.content}")
 
     context_text = "\n".join(context_lines)
     system_prompt = get_system_prompt()
 
-    full_prompt = f"""
-سجل المحادثة السابقة:
-{context_text}
-
-رسالة المستخدم الجديدة:
-{user_message}
-
-أجب على رسالة المستخدم بشكل مفيد ومختصر.
-"""
-
-    # Save user message
-    user_msg = ChatMessage(
-        session_id=session_id,
-        role="user",
-        content=user_message,
+    full_prompt = (
+        f"سجل المحادثة السابقة:\n{context_text}\n\n"
+        f"رسالة المستخدم الجديدة:\n{user_message}\n\n"
+        f"أجب على رسالة المستخدم بشكل مفيد ومختصر باللغة العربية."
     )
-    db.add(user_msg)
-    await db.flush()
 
     # Generate AI response
     try:
@@ -74,7 +59,7 @@ async def run_agent_loop(
         logger.error("Agent loop error: %s", exc)
         response_text = FALLBACK_MESSAGE_AR
 
-    # Save assistant message
+    # Save assistant message to DB
     assistant_msg = ChatMessage(
         session_id=session_id,
         role="assistant",
@@ -83,11 +68,4 @@ async def run_agent_loop(
     db.add(assistant_msg)
     await db.commit()
 
-    # Stream the response word by word
-    words = response_text.split()
-    for i, word in enumerate(words):
-        if i == len(words) - 1:
-            yield word
-        else:
-            yield word + " "
-        await asyncio.sleep(0.03)
+    return response_text
