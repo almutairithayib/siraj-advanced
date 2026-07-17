@@ -88,4 +88,4 @@ async def generate_tip(context: dict) -> str:
         f"- أكثر فئة إنفاقاً: {context.get('top_category', 'غير محدد')}\n\n"
         f"قدّم نصيحة مالية واحدة مختصرة وعملية (جملة أو جملتان فقط)."
     )
-    return await generate_text(prompt, system_prompt=system, max_tokens=150)
+    return await generate_text(prompt, system_prompt=system, max_tokens=4096)
