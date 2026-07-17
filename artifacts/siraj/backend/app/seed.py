@@ -27,7 +27,7 @@ async def seed_data(db: AsyncSession):
     demo_user = User(
         email="sara@siraj.sa",
         full_name="سارة القرني",
-        hashed_password=hash_password("password123"),
+        hashed_password=hash_password("12345678"),
         currency="SAR",
         created_at=datetime.utcnow() - timedelta(days=120)
     )
