@@ -13,6 +13,8 @@ from sqlalchemy.future import select
 
 from backend.app.models.chat import ChatMessage
 from backend.app.models.transaction import Transaction
+from backend.app.models.goal import FinancialGoal
+from backend.app.models.savings import SavingsGoal
 from backend.app.ai.ai_provider import generate_text, FALLBACK_MESSAGE_AR
 from backend.app.ai.system_prompt import get_system_prompt
 
@@ -20,11 +22,12 @@ logger = logging.getLogger("siraj.ai.agent_loop")
 
 
 async def _get_financial_summary(user_id: uuid.UUID, db: AsyncSession) -> str:
-    """Fetch the user's real transactions from the last 30 days and summarise them."""
+    """Build a full financial context from the user's real data."""
     today = date.today()
     month_ago = today - timedelta(days=30)
 
-    result = await db.execute(
+    # --- Transactions (last 30 days) ---
+    txn_result = await db.execute(
         select(Transaction)
         .where(
             Transaction.user_id == user_id,
@@ -32,10 +35,7 @@ async def _get_financial_summary(user_id: uuid.UUID, db: AsyncSession) -> str:
         )
         .order_by(Transaction.transaction_date.desc())
     )
-    txns = result.scalars().all()
-
-    if not txns:
-        return "لا توجد معاملات مسجّلة خلال الثلاثين يوماً الماضية."
+    txns = txn_result.scalars().all()
 
     total_income = Decimal("0")
     total_expense = Decimal("0")
@@ -51,22 +51,66 @@ async def _get_financial_summary(user_id: uuid.UUID, db: AsyncSession) -> str:
 
     balance = total_income - total_expense
     top_cats = sorted(by_category.items(), key=lambda x: x[1], reverse=True)[:3]
-    top_cats_str = "، ".join(f"{cat} ({amt:,.0f} ريال)" for cat, amt in top_cats)
+    top_cats_str = "، ".join(f"{cat} ({float(amt):,.0f} ريال)" for cat, amt in top_cats) or "لا يوجد"
 
     recent = txns[:5]
     recent_str = "\n".join(
         f"  {t.transaction_date} | {t.type} | {t.category} | {float(t.amount):,.0f} ريال | {t.description or ''}"
         for t in recent
-    )
+    ) or "  لا توجد معاملات"
 
-    return (
-        f"البيانات المالية للمستخدم (آخر 30 يوم):\n"
+    txn_section = (
+        f"المعاملات المالية (آخر 30 يوم):\n"
         f"إجمالي الدخل: {float(total_income):,.0f} ريال\n"
         f"إجمالي المصروفات: {float(total_expense):,.0f} ريال\n"
         f"صافي الرصيد: {float(balance):,.0f} ريال\n"
         f"أكثر فئات الإنفاق: {top_cats_str}\n"
         f"آخر المعاملات:\n{recent_str}"
+    ) if txns else "المعاملات المالية: لا توجد معاملات خلال آخر 30 يوماً"
+
+    # --- Financial Goals ---
+    goals_result = await db.execute(
+        select(FinancialGoal).where(FinancialGoal.user_id == user_id)
     )
+    goals = goals_result.scalars().all()
+
+    if goals:
+        goals_lines = []
+        for g in goals:
+            remaining = float(g.target_amount) - float(g.saved_amount)
+            goals_lines.append(
+                f"  هدف '{g.title}' (نوع: {g.goal_type}) — "
+                f"المستهدف: {float(g.target_amount):,.0f} ريال، "
+                f"المدخر: {float(g.saved_amount):,.0f} ريال، "
+                f"المتبقي: {remaining:,.0f} ريال، "
+                f"تاريخ الهدف: {g.target_date}"
+            )
+        goals_section = "الأهداف المالية:\n" + "\n".join(goals_lines)
+    else:
+        goals_section = "الأهداف المالية: لا توجد أهداف مالية مسجّلة"
+
+    # --- Savings Goals (Piggy Banks) ---
+    savings_result = await db.execute(
+        select(SavingsGoal).where(SavingsGoal.user_id == user_id)
+    )
+    savings = savings_result.scalars().all()
+
+    if savings:
+        savings_lines = []
+        for s in savings:
+            remaining = float(s.target_amount) - float(s.current_amount)
+            savings_lines.append(
+                f"  حصالة '{s.goal_name}' — "
+                f"المستهدف: {float(s.target_amount):,.0f} ريال، "
+                f"المدخر: {float(s.current_amount):,.0f} ريال، "
+                f"المتبقي: {remaining:,.0f} ريال، "
+                f"تاريخ الهدف: {s.target_date}"
+            )
+        savings_section = "الحصالات (أهداف الادخار):\n" + "\n".join(savings_lines)
+    else:
+        savings_section = "الحصالات: لا توجد حصالات مسجّلة"
+
+    return f"{txn_section}\n\n{goals_section}\n\n{savings_section}"
 
 
 async def run_agent_loop(
@@ -88,7 +132,6 @@ async def run_agent_loop(
     )
     history = list(reversed(history_result.scalars().all()))
 
-    # Build conversation history text
     history_lines = []
     for msg in history:
         role_label = "المستخدم" if msg.role == "user" else "سراج"
@@ -98,19 +141,16 @@ async def run_agent_loop(
     # Fetch real financial data
     financial_summary = await _get_financial_summary(user_id, db)
 
-    system_prompt = get_system_prompt()
-
     full_prompt = (
         f"{financial_summary}\n\n"
         f"سجل المحادثة:\n{history_text}\n\n"
         f"رسالة المستخدم: {user_message}"
     )
 
-    # Generate AI response
     try:
         response_text = await generate_text(
             prompt=full_prompt,
-            system_prompt=system_prompt,
+            system_prompt=get_system_prompt(),
             max_tokens=300,
         )
     except Exception as exc:
@@ -118,12 +158,7 @@ async def run_agent_loop(
         response_text = FALLBACK_MESSAGE_AR
 
     # Save assistant message
-    assistant_msg = ChatMessage(
-        session_id=session_id,
-        role="assistant",
-        content=response_text,
-    )
-    db.add(assistant_msg)
+    db.add(ChatMessage(session_id=session_id, role="assistant", content=response_text))
     await db.commit()
 
     return response_text
