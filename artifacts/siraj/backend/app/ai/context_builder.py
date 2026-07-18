@@ -48,6 +48,16 @@ async def build_context(user_id, db: AsyncSession) -> dict:
         )
         total_spending_month = float(month_expense.scalar() or 0)
 
+        # دخل الشهر الحالي
+        month_income = await db.execute(
+            select(func.sum(Transaction.amount)).where(
+                Transaction.user_id == user_id,
+                Transaction.type == "income",
+                Transaction.transaction_date >= start_of_month,
+            )
+        )
+        monthly_income = float(month_income.scalar() or 0)
+
         # أكثر فئة إنفاقاً هذا الشهر
         top_row = await db.execute(
             select(Transaction.category, func.sum(Transaction.amount).label("total"))
@@ -68,6 +78,7 @@ async def build_context(user_id, db: AsyncSession) -> dict:
         return {
             "balance": balance,
             "total_spending": total_spending_month,
+            "monthly_income": monthly_income,
             "total_income": total_income_all,
             "health_score": health_score,
             "top_category": top_category,
