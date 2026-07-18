@@ -12,6 +12,8 @@ class FinancingProductResponse(BaseModel):
     min_term_months: int
     max_term_months: int
     description: str
+    suitability: int | None = None          # 0–100
+    suitability_reason: str | None = None   # short Arabic explanation
 
 class FinancingRequestCreate(BaseModel):
     product_type: str

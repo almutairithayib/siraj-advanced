@@ -172,9 +172,36 @@ export default function FinancingPage() {
                   <div className="fin-product-icon">
                     <Icon size={20} />
                   </div>
-                  {p.suitability && (
-                    <div style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '12px', background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
-                      {p.suitability}% يناسبك
+                  {p.suitability != null && (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px'
+                    }}>
+                      <div style={{
+                        fontSize: '12px', fontWeight: '800', padding: '3px 10px',
+                        borderRadius: '12px',
+                        background: p.suitability >= 70
+                          ? 'rgba(22,163,74,0.12)'
+                          : p.suitability >= 45
+                          ? 'rgba(234,179,8,0.12)'
+                          : 'rgba(220,38,38,0.10)',
+                        color: p.suitability >= 70 ? '#16a34a'
+                          : p.suitability >= 45 ? '#b45309'
+                          : '#dc2626',
+                      }}>
+                        {p.suitability}% يناسبك
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{ width: '72px', height: '4px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                        <div style={{
+                          height: '100%',
+                          width: `${p.suitability}%`,
+                          borderRadius: '4px',
+                          background: p.suitability >= 70 ? '#16a34a'
+                            : p.suitability >= 45 ? '#eab308'
+                            : '#dc2626',
+                          transition: 'width 0.8s ease',
+                        }} />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -182,6 +209,20 @@ export default function FinancingPage() {
                 <p className="fin-product-desc" style={{ fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 'bold' }}>
                   نسبة المرابحة: {p.profit_rate}%
                 </p>
+                {p.suitability_reason && (
+                  <p style={{
+                    fontSize: '0.75rem',
+                    color: p.suitability >= 70 ? '#16a34a'
+                      : p.suitability >= 45 ? '#b45309'
+                      : '#dc2626',
+                    margin: '2px 0 4px',
+                    fontWeight: '500',
+                    lineHeight: '1.4',
+                    opacity: 0.9,
+                  }}>
+                    {p.suitability_reason}
+                  </p>
+                )}
                 <p className="fin-product-desc">{p.description}</p>
                 <div style={{ display: 'flex', gap: '8px', width: '100%', marginTop: '0.5rem' }}>
                   <button className="btn btn-primary" style={{ flex: 1, fontSize: '12px', padding: '0.5rem' }} onClick={() => setSelectedProduct(p)}>
