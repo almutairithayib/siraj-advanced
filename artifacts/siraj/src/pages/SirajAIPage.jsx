@@ -48,6 +48,45 @@ const welcomeMessage = {
   text: 'أهلًا! أنا سراج، مستشارك المالي الذكي. اسألني عن وضعك المالي أو اطلب مني تنفيذ عملية.',
 };
 
+// ─── Plan Summary Card (shown in wizard confirm step) ───────────────────────
+function PlanSummaryCard({ summary }) {
+  return (
+    <div style={{
+      background: 'rgba(232,115,79,0.1)',
+      border: '1px solid rgba(232,115,79,0.3)',
+      borderRadius: '12px', padding: '14px', marginTop: '8px', width: '100%',
+    }}>
+      <div style={{ fontWeight: '700', marginBottom: '10px', color: '#e8734f', fontSize: '14px' }}>
+        📋 ملخص الخطة الادخارية
+      </div>
+      <div style={{ display: 'grid', gap: '6px', fontSize: '13px', color: 'var(--text-primary)', lineHeight: '1.8' }}>
+        <div>🎯 الهدف: <strong>{summary.goalName}</strong></div>
+        <div>💰 إيداع شهري: <strong>{summary.monthlyAmount.toLocaleString('ar-SA')} ر.س</strong></div>
+        <div>📅 المدة: <strong>{summary.months} شهراً</strong></div>
+        <div>💎 إجمالي المدخرات: <strong>{summary.totalSaved.toLocaleString('ar-SA')} ر.س</strong></div>
+        <div>🗓️ التحقيق بحلول: <strong>{summary.dateStr}</strong></div>
+      </div>
+    </div>
+  );
+}
+
+// Chips to show for each wizard step
+function getWizardChips(step) {
+  switch (step) {
+    case 'goal_name':
+      return ['✈️ رحلة سفر', '💍 زواج', '🕋 حج وعمرة', '🚗 سيارة', '🎓 تعليم', '🛡️ طوارئ'];
+    case 'duration':
+      return ['3 أشهر', '6 أشهر', '12 شهراً', '24 شهراً', '36 شهراً'];
+    case 'suggest_amount':
+    case 'adjusting':
+      return ['⬆️ ارفع المبلغ', '✅ المبلغ يناسبني', '⬇️ قلل المبلغ'];
+    case 'confirm':
+      return ['✅ أكد إنشاء الخطة', '❌ إلغاء الخطة'];
+    default:
+      return [];
+  }
+}
+
 function CoinsForm({ onConfirm, onCancel }) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -109,6 +148,8 @@ export default function SirajAIPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [phraseIndex, setPhraseIndex] = useState(0);
+  const [planWizard, setPlanWizard] = useState(null);
+  // planWizard shape: { step, goalName, months, suggestedAmount, currentAmount, financialCtx, sessionId }
   const endRef = useRef(null);
   const hasSentInitialPrompt = useRef(false);
 
@@ -205,22 +246,22 @@ export default function SirajAIPage() {
   }, [sessions]);
 
   useEffect(() => {
-    if (location.state?.initialPrompt && !hasSentInitialPrompt.current && sessions.length > 0) {
-      hasSentInitialPrompt.current = true;
-      const initialPromptText = location.state.initialPrompt;
-      
-      // If we have an active session, send it, otherwise create one
-      let sessionId = activeSessionId;
-      if (!sessionId && sessions.length > 0) {
-        sessionId = sessions[0].id;
+    if (!hasSentInitialPrompt.current && sessions.length > 0) {
+      const sid = activeSessionId || sessions[0].id;
+
+      if (location.state?.mode === 'create_plan') {
+        hasSentInitialPrompt.current = true;
+        window.history.replaceState({}, document.title);
+        setTimeout(() => startPlanWizard(sid), 500);
+
+      } else if (location.state?.initialPrompt) {
+        hasSentInitialPrompt.current = true;
+        const initialPromptText = location.state.initialPrompt;
+        if (sid) {
+          setTimeout(() => send(initialPromptText, sid), 300);
+        }
+        window.history.replaceState({}, document.title);
       }
-      
-      if (sessionId) {
-        setTimeout(() => {
-          send(initialPromptText, sessionId);
-        }, 300);
-      }
-      window.history.replaceState({}, document.title);
     }
   }, [sessions]);
 
@@ -344,6 +385,132 @@ export default function SirajAIPage() {
     addMessage({ id: Date.now().toString(), role: 'assistant', text: 'تمام، ألغيت العملية. أي شي ثاني أقدر أساعدك فيه؟' }, sessionId);
   };
 
+  // ─── Plan Wizard ─────────────────────────────────────────────────────────────
+  const startPlanWizard = (sid) => {
+    const sessionId = sid || activeSessionId;
+    setPlanWizard({ step: 'goal_name', goalName: '', months: 0, suggestedAmount: 0, currentAmount: 0, financialCtx: null, sessionId });
+    setTimeout(() => {
+      addMessage({
+        id: Date.now().toString(),
+        role: 'assistant',
+        text: '✨ يللا نبدأ نخطط!\n\nما اسم الهدف الادخاري اللي تبي تحققه؟ اختر من الخيارات أو اكتب اسمك الخاص.',
+        isNew: true,
+      }, sessionId);
+    }, 100);
+  };
+
+  const handleWizardInput = async (text) => {
+    const wiz = planWizard;
+    if (!wiz || ['fetching', 'creating'].includes(wiz.step)) return;
+
+    addMessage({ id: Date.now().toString(), role: 'user', text }, wiz.sessionId);
+
+    if (wiz.step === 'goal_name') {
+      const goalName = text.replace(/^[✈️💍🕋🚗🎓🛡️📝]\s*/, '').trim();
+      setPlanWizard({ ...wiz, step: 'duration', goalName });
+      setTimeout(() => {
+        addMessage({
+          id: Date.now().toString(),
+          role: 'assistant',
+          text: `ممتاز! هدف «${goalName}» 👍\n\nكم شهر تبي تحقق فيه هذا الهدف؟`,
+          isNew: true,
+        }, wiz.sessionId);
+      }, 50);
+
+    } else if (wiz.step === 'duration') {
+      const months = parseInt(text) || 12;
+      const fetchId = 'fetch-' + Date.now();
+      setPlanWizard({ ...wiz, step: 'fetching', months });
+      addMessage({ id: fetchId, role: 'assistant', text: '⏳ جاري تحليل وضعك المالي...', isNew: false }, wiz.sessionId);
+
+      try {
+        const res = await apiClient.get('/dashboard/monthly-context');
+        const ctx = res.data;
+        const surplus = ctx.monthly_income - ctx.monthly_expense;
+
+        let suggested;
+        if (surplus > 500) {
+          suggested = Math.max(300, Math.round((surplus * 0.3) / 50) * 50);
+        } else if (ctx.balance > 1000) {
+          suggested = Math.max(200, Math.round((ctx.balance * 0.015) / 50) * 50);
+        } else {
+          suggested = 500;
+        }
+
+        const incLine = ctx.monthly_income > 0
+          ? `دخلك هذا الشهر: ${ctx.monthly_income.toLocaleString('ar-SA')} ر.س`
+          : `رصيدك الإجمالي: ${ctx.balance.toLocaleString('ar-SA')} ر.س`;
+        const surplusLine = surplus > 0
+          ? `الفائض الشهري: ${surplus.toLocaleString('ar-SA')} ر.س ✅`
+          : `⚠️ مصروفاتك تتجاوز دخلك هذا الشهر`;
+
+        const botText = `بناءً على سلوكك المالي:\n• ${incLine}\n• مصروفاتك: ${ctx.monthly_expense.toLocaleString('ar-SA')} ر.س\n• ${surplusLine}\n\nأقترح ادخار ${suggested.toLocaleString('ar-SA')} ر.س شهرياً لتحقيق هدف «${wiz.goalName}» خلال ${months} شهراً.\n\nهل يناسبك هذا المبلغ؟`;
+
+        // remove loading message then add real reply
+        setSessions(prev => prev.map(s =>
+          s.id !== wiz.sessionId ? s : { ...s, messages: s.messages.filter(m => m.id !== fetchId) }
+        ));
+        addMessage({ id: Date.now().toString(), role: 'assistant', text: botText, isNew: true }, wiz.sessionId);
+        setPlanWizard({ ...wiz, step: 'suggest_amount', months, suggestedAmount: suggested, currentAmount: suggested, financialCtx: ctx });
+
+      } catch {
+        setSessions(prev => prev.map(s =>
+          s.id !== wiz.sessionId ? s : { ...s, messages: s.messages.filter(m => m.id !== fetchId) }
+        ));
+        const suggested = 500;
+        addMessage({ id: Date.now().toString(), role: 'assistant', text: `أقترح ادخار ${suggested} ر.س شهرياً. هل يناسبك؟`, isNew: true }, wiz.sessionId);
+        setPlanWizard({ ...wiz, step: 'suggest_amount', months, suggestedAmount: suggested, currentAmount: suggested, financialCtx: null });
+      }
+
+    } else if (wiz.step === 'suggest_amount' || wiz.step === 'adjusting') {
+      let newAmount = wiz.currentAmount;
+
+      if (text.includes('ارفع') || text.includes('⬆️')) {
+        newAmount = Math.round((newAmount * 1.25) / 50) * 50;
+        setPlanWizard({ ...wiz, step: 'adjusting', currentAmount: newAmount });
+        addMessage({ id: Date.now().toString(), role: 'assistant', text: `تم رفع المبلغ إلى ${newAmount.toLocaleString('ar-SA')} ر.س شهرياً 📈\nهل يناسبك الآن؟`, isNew: true }, wiz.sessionId);
+
+      } else if (text.includes('قلل') || text.includes('⬇️')) {
+        newAmount = Math.max(100, Math.round((newAmount * 0.75) / 50) * 50);
+        setPlanWizard({ ...wiz, step: 'adjusting', currentAmount: newAmount });
+        addMessage({ id: Date.now().toString(), role: 'assistant', text: `تم تخفيض المبلغ إلى ${newAmount.toLocaleString('ar-SA')} ر.س شهرياً 📉\nهل يناسبك الآن؟`, isNew: true }, wiz.sessionId);
+
+      } else {
+        // Amount approved → show confirm card
+        const totalSaved = newAmount * wiz.months;
+        const targetDate = new Date();
+        targetDate.setMonth(targetDate.getMonth() + wiz.months);
+        const dateStr = targetDate.toLocaleDateString('ar-SA', { year: 'numeric', month: 'long' });
+        setPlanWizard({ ...wiz, step: 'confirm', currentAmount: newAmount });
+        addMessage({
+          id: Date.now().toString(),
+          role: 'assistant',
+          text: 'ممتاز! إليك ملخص خطتك:',
+          isNew: true,
+          planSummary: { goalName: wiz.goalName, months: wiz.months, monthlyAmount: newAmount, totalSaved, dateStr },
+        }, wiz.sessionId);
+      }
+
+    } else if (wiz.step === 'confirm') {
+      if (text.includes('أكد') || text.includes('✅')) {
+        setPlanWizard({ ...wiz, step: 'creating' });
+        setToolStatus('جاري إنشاء خطة الادخار...');
+        const targetAmount = wiz.currentAmount * wiz.months;
+        const res = await addPlan(wiz.goalName, targetAmount, wiz.months);
+        setToolStatus(null);
+        setPlanWizard(null);
+        if (res.success) {
+          addMessage({ id: Date.now().toString(), role: 'assistant', text: `تم إنشاء خطة «${wiz.goalName}» بنجاح! 🎉\n\nستجد حصالتك في صفحة الادخار. ادخر ${wiz.currentAmount.toLocaleString('ar-SA')} ر.س كل شهر وستصل لهدفك خلال ${wiz.months} شهراً. وفقك الله! ✨`, isNew: true }, wiz.sessionId);
+        } else {
+          addMessage({ id: Date.now().toString(), role: 'assistant', text: `حدث خطأ أثناء إنشاء الخطة (${res.error}). جرب مرة ثانية من صفحة الادخار.`, isNew: true }, wiz.sessionId);
+        }
+      } else {
+        setPlanWizard(null);
+        addMessage({ id: Date.now().toString(), role: 'assistant', text: 'تمام، ألغيت الخطة. أي وقت تبي تبدأ من جديد أنا هنا! 😊', isNew: true }, wiz.sessionId);
+      }
+    }
+  };
+
   const startNewChat = async () => {
     try {
       const createRes = await apiClient.post('/chat/sessions', { title: 'محادثة استشارية' });
@@ -439,6 +606,7 @@ export default function SirajAIPage() {
           <div key={m.id || i} className={`siraj-msg-row ${m.role === 'user' ? 'user' : 'assistant'}`} style={{ position: 'relative', zIndex: 1 }}>
             <div className={`siraj-msg-bubble ${m.role === 'user' ? 'user' : 'assistant'}`} style={{ whiteSpace: 'pre-wrap' }}>
               {m.isNew ? <Typewriter text={m.text} speed={45} /> : m.text}
+              {m.planSummary && <PlanSummaryCard summary={m.planSummary} />}
             </div>
           </div>
         ))}
@@ -469,13 +637,27 @@ export default function SirajAIPage() {
         <div ref={endRef} />
       </div>
 
-      {/* Quick Chips */}
+      {/* Quick Chips / Wizard Chips */}
       <div className="siraj-chips-row">
-        {quickChips.map((chip) => (
-          <button key={chip} className="siraj-chip" onClick={() => send(chip)}>
-            {chip}
-          </button>
-        ))}
+        {planWizard && getWizardChips(planWizard.step).length > 0
+          ? getWizardChips(planWizard.step).map((chip) => (
+              <button
+                key={chip}
+                className="siraj-chip"
+                style={chip.startsWith('✅') ? { background: 'rgba(22,163,74,0.15)', color: '#16a34a', borderColor: 'rgba(22,163,74,0.3)' }
+                  : chip.startsWith('❌') ? { background: 'rgba(220,38,38,0.1)', color: '#dc2626', borderColor: 'rgba(220,38,38,0.2)' }
+                  : {}}
+                onClick={() => handleWizardInput(chip)}
+              >
+                {chip}
+              </button>
+            ))
+          : quickChips.map((chip) => (
+              <button key={chip} className="siraj-chip" onClick={() => send(chip)}>
+                {chip}
+              </button>
+            ))
+        }
       </div>
 
       {/* Input */}
@@ -483,11 +665,30 @@ export default function SirajAIPage() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send(input)}
-          placeholder="اكتب رسالتك..."
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || !input.trim()) return;
+            if (planWizard && !['fetching','creating'].includes(planWizard.step)) {
+              handleWizardInput(input);
+              setInput('');
+            } else {
+              send(input);
+            }
+          }}
+          placeholder={planWizard ? 'اكتب ردك...' : 'اكتب رسالتك...'}
           className="siraj-input-field"
         />
-        <button className="siraj-send-btn" onClick={() => send(input)}>
+        <button
+          className="siraj-send-btn"
+          onClick={() => {
+            if (!input.trim()) return;
+            if (planWizard && !['fetching','creating'].includes(planWizard.step)) {
+              handleWizardInput(input);
+              setInput('');
+            } else {
+              send(input);
+            }
+          }}
+        >
           <Send size={16} style={{ transform: 'rotate(-90deg)' }} />
         </button>
       </div>

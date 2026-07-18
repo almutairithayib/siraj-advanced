@@ -22,6 +22,22 @@ from backend.app.services.financial_service import (
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
+
+@router.get("/monthly-context")
+async def get_monthly_context(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns current-month income, expense, and all-time balance for the AI plan wizard."""
+    from backend.app.ai.context_builder import build_context
+    ctx = await build_context(current_user.id, db)
+    return {
+        "monthly_income":  ctx.get("monthly_income", 0.0),
+        "monthly_expense": ctx.get("total_spending", 0.0),
+        "balance":         ctx.get("balance", 0.0),
+        "total_income":    ctx.get("total_income", 0.0),
+    }
+
 # Mock daily tips in Arabic
 TIPS = [
     "تجنب الشراء الاندفاعي! انتظر 24 ساعة قبل شراء أي منتج غير ضروري لتتأكد من حاجتك الفعلية له.",

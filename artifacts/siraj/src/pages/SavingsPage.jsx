@@ -69,7 +69,7 @@ export default function SavingsPage() {
         <div style={{ display: 'flex', gap: '8px' }}>
           <Link 
             to="/siraj-ai" 
-            state={{ initialPrompt: 'أريد مساعدة في إنشاء خطة ادخارية ذكية لحصالة جديدة. أريد أن تقترح لي اسم الحصالة، المدة المناسبة، الهدف، ومبلغ الاستقطاع الشهري بناءً على وضعي المالي حتى أحقق هدفي.' }}
+            state={{ mode: 'create_plan' }}
             className="btn btn-secondary"
             style={{ fontSize: '13px', padding: '6px 12px', background: 'rgba(232, 115, 79, 0.1)', color: '#e8734f', borderColor: 'rgba(232, 115, 79, 0.2)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold' }}
           >
@@ -191,7 +191,7 @@ export default function SavingsPage() {
             <div className="fin-form-actions" style={{ flexDirection: 'column' }}>
               <Link 
                 to="/siraj-ai" 
-                state={{ initialPrompt: 'أريد مساعدة في إنشاء خطة ادخارية ذكية لحصالة جديدة. أريد أن تقترح لي اسم الحصالة، المدة المناسبة، الهدف، ومبلغ الاستقطاع الشهري بناءً على وضعي المالي حتى أحقق هدفي.' }}
+                state={{ mode: 'create_plan' }}
                 style={{ width: '100%', background: '#e8734f', color: '#fff', padding: '12px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textDecoration: 'none', marginBottom: '10px' }}
               >
                 <Sparkles size={16} /> أنشئ لي خطة بالذكاء الاصطناعي
